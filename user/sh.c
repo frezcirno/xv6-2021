@@ -3,6 +3,7 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
+#include "kernel/stat.h"
 
 // Parsed command representation
 #define EXEC  1
@@ -12,6 +13,8 @@
 #define BACK  5
 
 #define MAXARGS 10
+
+int interactive;
 
 struct cmd {
   int type;
@@ -133,7 +136,8 @@ runcmd(struct cmd *cmd)
 int
 getcmd(char *buf, int nbuf)
 {
-  fprintf(2, "$ ");
+  if(interactive)
+    fprintf(2, "$ ");
   memset(buf, 0, nbuf);
   gets(buf, nbuf);
   if(buf[0] == 0) // EOF
@@ -142,7 +146,7 @@ getcmd(char *buf, int nbuf)
 }
 
 int
-main(void)
+main(int argc, char *argv[])
 {
   static char buf[100];
   int fd;
@@ -154,6 +158,20 @@ main(void)
       break;
     }
   }
+
+  if(argc > 1){
+    close(0);
+    fd = open(argv[1], O_RDONLY);
+    if(fd != 0){
+      fprintf(2, "cannot open %s\n", argv[1]);
+      exit(-1);
+    }
+  }
+
+  struct stat st;
+  fstat(0, &st);
+  if(st.type == T_DEVICE)
+    interactive = 1;
 
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
