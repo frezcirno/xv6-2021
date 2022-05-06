@@ -144,6 +144,20 @@ found:
   return p;
 }
 
+uint64
+countproc(void)
+{
+  uint64 i = 0;
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->state != UNUSED) {
+      i++;
+    }
+  }
+  return i;
+}
+
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.

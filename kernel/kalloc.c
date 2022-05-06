@@ -23,6 +23,23 @@ struct {
   struct run *freelist;
 } kmem;
 
+uint64
+collect()
+{
+  uint64 i = 0;
+  struct run *r;
+
+  acquire(&kmem.lock);
+  r = kmem.freelist;
+  while(r) {
+    i++;
+    r = r->next;
+  }
+  release(&kmem.lock);
+
+  return i * PGSIZE;
+}
+
 void
 kinit()
 {
