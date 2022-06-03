@@ -115,6 +115,20 @@ printf(char *fmt, ...)
 }
 
 void
+backtrace()
+{
+  uint64 fp = r_fp();
+  uint64 top = PGROUNDUP(fp);
+  uint64 bottom = PGROUNDDOWN(fp);
+  printf("backtrace:\n");
+  while (fp < top && fp >= bottom){
+    uint64 ret_addr = ((uint64 *)fp)[-1];
+    printf("%p\n", (uint64 *)ret_addr);
+    fp = ((uint64 *)fp)[-2];
+  }
+}
+
+void
 panic(char *s)
 {
   pr.locking = 0;
