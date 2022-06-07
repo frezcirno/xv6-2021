@@ -141,6 +141,15 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->ticks = 0;
+  p->handler = 0;
+  p->elapsed = 0;
+  if((p->sigframe = (struct trapframe *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
   return p;
 }
 
@@ -150,6 +159,8 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  if(p->sigframe)
+    kfree((void*)p->sigframe);
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
