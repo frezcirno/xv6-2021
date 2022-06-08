@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "sleeplock.h"
+#include "file.h"
+#include "fcntl.h"
 
 /*
  * the kernel's page table.
@@ -431,4 +436,135 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+uint64
+mmap(uint64 addr, int length, int prot, int flags, int fd, int offset)
+{
+  struct proc *p = myproc();
+  struct file *f;
+  struct vma *vma;
+  int i;
+
+  if (fd < 0 || fd >= NOFILE || (f = p->ofile[fd]) == 0)
+    return -1;
+
+  if(offset >= f->ip->size)
+    return -1;
+
+  // find an available slot
+  for (i = 0; i < MAXVMA; i++) {
+    if (p->vma[i].vma_start == 0)
+      break;
+  }
+  if (i == MAXVMA)
+    return -1;
+
+  vma = &p->vma[i];
+  f = p->ofile[fd];
+
+  if (flags & MAP_SHARED) {
+    if ((prot & PROT_READ) && !f->readable)
+      return -1;
+    if ((prot & PROT_WRITE) && !f->writable)
+      return -1;
+  }
+
+  vma->vma_end = p->vma_end;
+  vma->vma_start = p->vma_end = PGROUNDDOWN(p->vma_end - length);
+
+  vma->prot = 0;
+  if (prot & PROT_READ)
+    vma->prot |= PTE_R;
+  if (prot & PROT_WRITE)
+    vma->prot |= PTE_W;
+  vma->flags = flags;
+  vma->offset = offset;
+  vma->f = filedup(f);
+  return vma->vma_start;
+}
+
+uint64
+munmap(uint64 addr, int len)
+{
+  struct proc *p = myproc();
+  struct vma *vma;
+  uint64 pa;
+  int i;
+
+  for (i = 0; i < MAXVMA; i++) {
+    if (p->vma[i].vma_start != 0 && p->vma[i].vma_start <= addr &&
+        addr < p->vma[i].vma_end)
+      break;
+  }
+
+  if (i == MAXVMA)
+    return -1;
+
+  vma = &p->vma[i];
+
+  if (addr + len > vma->vma_end)
+    return -1;
+
+  filewrite(vma->f, addr, len);
+
+  if ((pa = walkaddr(p->pagetable, addr)) != 0)
+    uvmunmap(p->pagetable, addr, len >> PGSHIFT, 1);
+
+  if (vma->vma_start == addr)
+    vma->vma_start += len;
+  else
+    vma->vma_end -= len;
+
+  if (vma->vma_end == vma->vma_start) {
+    fileclose(vma->f);
+    vma->vma_start = 0;
+    vma->vma_end = 0;
+    vma->f = 0;
+  }
+
+  return 0;
+}
+
+int
+handle_page_fault(pagetable_t pagetable, uint64 va)
+{
+  uint64 pa;
+  struct vma *vma = 0;
+  struct proc *p = myproc();
+  int r;
+  struct file *f;
+
+  if (va >= MAXVA)
+    return -1;
+
+  va = PGROUNDDOWN(va);
+  for (int i = 0; i < MAXVMA; i++) {
+    if (p->vma[i].vma_start && p->vma[i].vma_start <= va &&
+        va < p->vma[i].vma_end) {
+      vma = &p->vma[i];
+      break;
+    }
+  }
+  if (vma == 0)
+    return -1;
+
+  if ((pa = (uint64)kalloc()) == 0)
+    return -1;
+  memset((void *)pa, 0, PGSIZE);
+  if (mappages(pagetable, va, PGSIZE, pa, vma->prot | PTE_U) != 0) {
+    kfree((void *)pa);
+    return -1;
+  }
+
+  f = vma->f;
+  ilock(f->ip);
+  if ((r = readi(f->ip, 1, va, vma->offset + (va - vma->vma_start), PGSIZE)) ==
+      -1) {
+    iunlock(f->ip);
+    kfree((void *)pa);
+    return -1;
+  }
+  iunlock(f->ip);
+  return 0;
 }

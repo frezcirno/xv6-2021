@@ -141,6 +141,9 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  memset(&p->vma, 0, sizeof(p->vma));
+  p->vma_end = TRAPFRAME;
+
   return p;
 }
 
@@ -303,6 +306,14 @@ fork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  // copy vma
+  memmove(np->vma, p->vma, sizeof(struct vma));
+  np->vma_end = p->vma_end;
+  for (i = 0; i < MAXVMA; i++) {
+    if (p->vma[i].f)
+      filedup(p->vma[i].f);
+  }
+
   pid = np->pid;
 
   release(&np->lock);
@@ -340,6 +351,7 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
+  struct vma *vma;
 
   if(p == initproc)
     panic("init exiting");
@@ -351,6 +363,12 @@ exit(int status)
       fileclose(f);
       p->ofile[fd] = 0;
     }
+  }
+
+  for (int i = 0; i < MAXVMA; i++) {
+    vma = &p->vma[i];
+    if (vma->vma_start != 0)
+      munmap(vma->vma_start, vma->vma_end - vma->vma_start);
   }
 
   begin_op();
